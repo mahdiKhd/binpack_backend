@@ -1,0 +1,69 @@
+services:
+  db:
+    image: postgres:17.3-alpine3.21
+    environment:
+      POSTGRES_DB: binpack
+      POSTGRES_USER: binpack
+      POSTGRES_PASSWORD: binpack
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U binpack -d binpack"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4.2-alpine3.21
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      network: host
+    env_file: .env
+    environment:
+      RUN_MIGRATIONS: "true"
+      COLLECT_STATIC: "true"
+    command: daphne -b 0.0.0.0 -p 8000 config.asgi:application
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - media_data:/app/media
+      - static_data:/app/staticfiles
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      network: host
+    env_file: .env
+    command: celery -A config worker -l INFO --concurrency=2
+    volumes:
+      - .:/app
+      - media_data:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  media_data:
+  static_data:
